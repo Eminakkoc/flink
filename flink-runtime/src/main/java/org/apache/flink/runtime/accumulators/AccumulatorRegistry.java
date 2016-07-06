@@ -74,7 +74,7 @@ public class AccumulatorRegistry {
 	public AccumulatorSnapshot getSnapshot() {
 		try {
 			return new AccumulatorSnapshot(jobID, taskID, flinkAccumulators, userAccumulators);
-		} catch (IOException e) {
+		} catch (Throwable e) {
 			LOG.warn("Failed to serialize accumulators for task.", e);
 			return null;
 		}
