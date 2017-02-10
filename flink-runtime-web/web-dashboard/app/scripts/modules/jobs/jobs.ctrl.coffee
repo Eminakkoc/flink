@@ -42,22 +42,48 @@ angular.module('flinkApp')
 
 # --------------------------------------
 
-.controller 'SingleJobController', ($scope, $state, $stateParams, JobsService, MetricsService, $rootScope, flinkConfig, $interval) ->
+.controller 'SingleJobController', ($scope, $q, $state, $stateParams, JobsService, MetricsService, $rootScope, flinkConfig, $interval) ->
   $scope.jobid = $stateParams.jobid
   $scope.job = null
   $scope.plan = null
   $scope.vertices = null
   $scope.backPressureOperatorStats = {}
+  $scope.watermarks = {}
+  NO_WATERMARK_VALUE = -9223372036854775808
+
+  # getlatest watermarks from MetricsService and update watermarks map
+  getWatermarks = (vertexId) ->
+
+    watermarkIdList = JobsService.getWatermarkIds(vertexId)
+    MetricsService.setupLSFor($scope.jobid, vertexId)
+    MetricsService.getMetrics($scope.jobid, vertexId, watermarkIdList).then (data) ->
+      $scope.watermarks[vertexId] = watermarkIdList.map (value) ->
+        if data.values[value]? && data.values[value] != NO_WATERMARK_VALUE
+          data.values[value]
+        else
+          "No Watermark available"
 
   JobsService.loadJob($stateParams.jobid).then (data) ->
     $scope.job = data
     $scope.plan = data.plan
-    $scope.vertices = data.vertices
+
+    #initialize watermarks map for each vertex
+    data.vertices.map (vertex) ->
+      if vertex.id?
+        getWatermarks(vertex.id)
+
     MetricsService.setupMetrics($stateParams.jobid, data.vertices)
+
+    $scope.vertices = data.vertices
 
   refresher = $interval ->
     JobsService.loadJob($stateParams.jobid).then (data) ->
       $scope.job = data
+
+      #update watermarks map for each vertex
+      data.vertices.map (vertex) ->
+        if vertex.id?
+          getWatermarks(vertex.id)
 
       $scope.$broadcast 'reload'
 

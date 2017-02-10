@@ -175,8 +175,7 @@ angular.module('flinkApp')
         direction: 'vertical'
       ))
 # ----------------------------------------------
-
-.directive 'jobPlan', ($timeout) ->
+.directive 'jobPlan', ($timeout, $interval) ->
   template: "
     <svg class='graph' width='500' height='400'><g /></svg>
     <svg class='tmp' width='1' height='1'><g /></svg>
@@ -188,12 +187,16 @@ angular.module('flinkApp')
   scope:
     plan: '='
     setNode: '&'
+    watermarks: '='
 
   link: (scope, elem, attrs) ->
     g = null
     mainZoom = d3.behavior.zoom()
     subgraphs = []
     jobid = attrs.jobid
+
+    lastPosition = 0
+    lastZoomScale = 0
 
     mainSvgElement = elem.children()[0]
     mainG = elem.children().children()[0]
@@ -246,7 +249,6 @@ angular.module('flinkApp')
         labelValue += "</div>"
       labelValue
 
-
     # true, if the node is a special node from an iteration
     isSpecialIterationNode = (info) ->
       (info is "partialSolution" or info is "nextPartialSolution" or info is "workset" or info is "nextWorkset" or info is "solutionSet" or info is "solutionDelta")
@@ -279,6 +281,10 @@ angular.module('flinkApp')
         # clean stepName
         stepName = shortenString(stepName)
         labelValue += "<h4 class='step-name'>" + stepName + "</h4>"
+
+        # append watermarks label
+        if scope.watermarks[el.id]?
+          labelValue += "<h5 class='watermark'>" + scope.watermarks[el.id][0] + "</h5>"
 
       # If this node is an "iteration" we need a different panel-body
       if el.step_function?
@@ -422,6 +428,55 @@ angular.module('flinkApp')
           for j of el.step_function
             return el.step_function[j]  if el.step_function[j].id is nodeID
 
+    # added for updating graph within each watermark map update
+    # this function has extra arrangements as applying the latest zoom scale and position to the graph after rerendering
+    updateGraph = (data) ->
+      g = new dagreD3.graphlib.Graph({ multigraph: true, compound: true }).setGraph({
+        nodesep: 70
+        edgesep: 0
+        ranksep: 50
+        rankdir: "LR"
+        marginx: 40
+        marginy: 40
+      })
+
+      loadJsonToDagre(g, data)
+      d3mainSvgG.selectAll("*").remove()
+
+      d3mainSvgG.attr("transform", "scale(" + 1 + ")")
+
+      renderer = new dagreD3.render()
+      d3mainSvgG.call(renderer, g)
+
+      for i, sg of subgraphs
+        d3mainSvg.select('svg.svg-' + i + ' g').call(renderer, sg)
+
+      newScale = 0.5
+      d3mainSvgG.attr("transform", "scale(" + 1 + ")")
+
+      xCenterOffset = Math.floor((angular.element(mainSvgElement).width() - g.graph().width * newScale) / 2)
+      yCenterOffset = Math.floor((angular.element(mainSvgElement).height() - g.graph().height * newScale) / 2)
+
+      # apply last position and zoom scale not to reset the graph to center
+      if lastZoomScale != 0 && lastPosition != 0
+        mainZoom.scale(lastZoomScale).translate(lastPosition)
+        d3mainSvgG.attr("transform", "translate(" + lastPosition + ") scale(" + lastZoomScale + ")")
+      else
+        mainZoom.scale(newScale).translate([xCenterOffset, yCenterOffset])
+        d3mainSvgG.attr("transform", "translate(" + xCenterOffset + ", " + yCenterOffset + ") scale(" + mainZoom.scale() + ")")
+
+      mainZoom.on("zoom", ->
+        ev = d3.event
+        lastZoomScale = ev.scale
+        lastPosition = ev.translate
+
+        d3mainSvgG.attr "transform", "translate(" + ev.translate + ") scale(" + ev.scale + ")"
+      )
+      mainZoom(d3mainSvg)
+
+      d3mainSvgG.selectAll('.node').on 'click', (d) ->
+        scope.setNode({ nodeid: d })
+        
     drawGraph = (data) ->
       g = new dagreD3.graphlib.Graph({ multigraph: true, compound: true }).setGraph({
         nodesep: 70
@@ -433,6 +488,9 @@ angular.module('flinkApp')
         })
 
       loadJsonToDagre(g, data)
+      d3mainSvgG.selectAll("*").remove()
+
+      d3mainSvgG.attr("transform", "scale(" + 1 + ")")
 
       renderer = new dagreD3.render()
       d3mainSvgG.call(renderer, g)
@@ -446,7 +504,6 @@ angular.module('flinkApp')
       yCenterOffset = Math.floor((angular.element(mainSvgElement).height() - g.graph().height * newScale) / 2)
 
       mainZoom.scale(newScale).translate([xCenterOffset, yCenterOffset])
-
       d3mainSvgG.attr("transform", "translate(" + xCenterOffset + ", " + yCenterOffset + ") scale(" + mainZoom.scale() + ")")
 
       mainZoom.on("zoom", ->
@@ -460,5 +517,12 @@ angular.module('flinkApp')
 
     scope.$watch attrs.plan, (newPlan) ->
       drawGraph(newPlan) if newPlan
+
+    # watermarks watcher updates graph in each update
+    scope.$watch 'watermarks', (newWatermarks) ->
+      if scope.plan? && newWatermarks
+        setTimeout ->
+          updateGraph(scope.plan)
+    , true
 
     return

@@ -120,7 +120,6 @@ angular.module('flinkApp')
         data = angular.extend(data, jobConfig)
 
         currentJob = data
-
         deferreds.job.resolve(currentJob)
 
     deferreds.job.promise
@@ -193,6 +192,20 @@ angular.module('flinkApp')
         deferred.resolve(taskmanagers)
 
     deferred.promise
+
+  #this function gets watermarks for each vertex and for each parallelism count
+  @getWatermarkIds = (vertexid) ->
+
+    idList= []
+
+    parallelism = @seekVertex(vertexid).parallelism
+    count = 0
+
+    while count < parallelism
+      idList = idList.concat([count + ".currentLowWatermark"])
+      count++;
+
+    idList
 
   @getAccumulators = (vertexid) ->
     deferred = $q.defer()
